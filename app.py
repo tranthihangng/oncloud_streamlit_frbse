@@ -8,10 +8,19 @@ import time
 
 # Cấu hình trang
 st.set_page_config(
-    page_title="Light Sensor Dashboard",
+    page_title="NATECH Light Sensor Dashboard",
     page_icon="📊",
     layout="wide"
 )
+
+# Ẩn chỉ phần link GitHub
+hide_github_style = """
+    <style>
+    footer {visibility: hidden;}
+    .stDeployButton {display:none;}
+    </style>
+"""
+st.markdown(hide_github_style, unsafe_allow_html=True)
 
 # Firebase config - Đọc từ Streamlit Secrets nếu có, nếu không dùng config mặc định
 try:
@@ -27,7 +36,7 @@ except (KeyError, AttributeError):
 FIREBASE_DB_URL = database_url.rstrip('/')
 
 # Tiêu đề
-st.title("📊 Dashboard – Light Sensor")
+st.title("📊 Dashboard – NATECH Light Sensor")
 st.markdown("Dữ liệu lấy trực tiếp từ Firebase Realtime Database")
 
 # Sidebar để cấu hình
