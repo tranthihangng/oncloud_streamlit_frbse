@@ -36,42 +36,96 @@ with st.sidebar:
     auto_refresh = st.checkbox("Tự động làm mới", value=True)
     refresh_interval = st.slider("Khoảng thời gian làm mới (giây)", 1, 60, 5)
     max_data_points = st.slider("Số điểm dữ liệu tối đa", 10, 500, 100)
+    show_debug = st.checkbox("Hiển thị thông tin debug", value=False)
 
 # Hàm lấy dữ liệu từ Firebase bằng REST API
 @st.cache_data(ttl=1)  # Cache 1 giây
-def get_sensor_data():
+def get_sensor_data(show_debug=False):
     try:
         # Gọi Firebase Realtime Database REST API
         url = f"{FIREBASE_DB_URL}/sensor_data.json"
+        
+        if show_debug:
+            st.info(f"🔗 Đang kết nối: `{url}`")
+        
         response = requests.get(url, timeout=10)
+        
+        if show_debug:
+            st.info(f"📡 Status Code: {response.status_code}")
+        
+        # Kiểm tra nếu bị từ chối (có thể do Rules)
+        if response.status_code == 401 or response.status_code == 403:
+            st.error("❌ **Lỗi quyền truy cập**: Firebase Database Rules không cho phép đọc công khai. Vui lòng cập nhật Rules trong Firebase Console.")
+            if show_debug:
+                st.code(response.text, language="json")
+            return pd.DataFrame()
+        
         response.raise_for_status()
         
         data = response.json()
-        if data:
-            records = []
-            for timestamp, values in data.items():
-                if isinstance(values, dict) and "light_inte" in values:
+        
+        if show_debug:
+            st.json(data if data else {"message": "Không có dữ liệu"})
+        
+        if data is None:
+            if show_debug:
+                st.warning("⚠️ Firebase trả về `null` - Có thể path `sensor_data` không tồn tại hoặc trống")
+            return pd.DataFrame()
+        
+        if not data:
+            if show_debug:
+                st.warning("⚠️ Firebase trả về object rỗng `{}`")
+            return pd.DataFrame()
+        
+        records = []
+        for timestamp, values in data.items():
+            if isinstance(values, dict):
+                if "light_inte" in values:
                     records.append({
                         "timestamp": timestamp,
                         "light_inte": values.get("light_inte", 0),
                         "datetime": datetime.fromtimestamp(int(timestamp)) if timestamp.isdigit() else None
                     })
+                elif show_debug:
+                    st.warning(f"⚠️ Không tìm thấy key 'light_inte' trong: {timestamp}")
+            elif show_debug:
+                st.warning(f"⚠️ Giá trị không phải dict: {timestamp} = {values}")
+        
+        if records:
+            df = pd.DataFrame(records)
+            # Sắp xếp theo timestamp và giới hạn số điểm
+            df = df.sort_values("timestamp").tail(max_data_points)
+            if show_debug:
+                st.success(f"✅ Đã lấy được {len(records)} bản ghi")
+            return df
+        else:
+            if show_debug:
+                st.warning("⚠️ Không tìm thấy bản ghi nào có key 'light_inte'")
+            return pd.DataFrame()
             
-            if records:
-                df = pd.DataFrame(records)
-                # Sắp xếp theo timestamp và giới hạn số điểm
-                df = df.sort_values("timestamp").tail(max_data_points)
-                return df
+    except requests.exceptions.Timeout:
+        st.error("⏱️ **Lỗi timeout**: Không thể kết nối đến Firebase trong thời gian cho phép")
+        return pd.DataFrame()
+    except requests.exceptions.ConnectionError:
+        st.error("🌐 **Lỗi kết nối**: Không thể kết nối đến Firebase. Kiểm tra internet và URL database.")
+        return pd.DataFrame()
+    except requests.exceptions.HTTPError as e:
+        st.error(f"❌ **Lỗi HTTP {e.response.status_code}**: {e}")
+        if show_debug and e.response.text:
+            st.code(e.response.text, language="json")
         return pd.DataFrame()
     except requests.exceptions.RequestException as e:
-        st.error(f"Lỗi kết nối Firebase: {e}")
+        st.error(f"❌ **Lỗi kết nối Firebase**: {e}")
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Lỗi khi lấy dữ liệu: {e}")
+        st.error(f"❌ **Lỗi không xác định**: {e}")
+        if show_debug:
+            import traceback
+            st.code(traceback.format_exc(), language="python")
         return pd.DataFrame()
 
 # Lấy dữ liệu
-df = get_sensor_data()
+df = get_sensor_data(show_debug=show_debug)
 
 # Hiển thị metrics
 if not df.empty:
@@ -122,6 +176,42 @@ if not df.empty:
         st.rerun()
 else:
     st.warning("⚠️ Chưa có dữ liệu từ Firebase. Vui lòng kiểm tra kết nối và cấu hình.")
+    
+    # Hiển thị thông tin debug và hướng dẫn
+    with st.expander("🔍 Hướng dẫn khắc phục"):
+        st.markdown("""
+        **Các bước kiểm tra:**
+        
+        1. **Firebase Database Rules**: Đảm bảo Rules cho phép đọc công khai:
+        ```json
+        {
+          "rules": {
+            "sensor_data": {
+              ".read": true,
+              ".write": false
+            }
+          }
+        }
+        ```
+        
+        2. **Kiểm tra URL Database**: Xem bên dưới
+        
+        3. **Kiểm tra path dữ liệu**: Đảm bảo có dữ liệu tại path `sensor_data` trong Firebase Console
+        
+        4. **Cấu trúc dữ liệu**: Dữ liệu phải có dạng:
+        ```json
+        {
+          "sensor_data": {
+            "1234567890": {
+              "light_inte": 75
+            }
+          }
+        }
+        ```
+        
+        5. **Bật chế độ Debug**: Tích vào checkbox "Hiển thị thông tin debug" ở sidebar để xem chi tiết lỗi
+        """)
+        st.info(f"**Database URL hiện tại**: `{FIREBASE_DB_URL}`")
     
     if auto_refresh:
         time.sleep(refresh_interval)
