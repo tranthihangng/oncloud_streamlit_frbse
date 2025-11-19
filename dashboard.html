@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Light Sensor Dashboard</title>
+
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      font-family: Arial;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px #ccc;
+      max-width: 800px;
+      margin: auto;
+    }
+    canvas {
+      width: 100% !important;
+      height: 350px !important;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="card">
+    <h2>📊 Dashboard – Light Sensor</h2>
+    <p>Dữ liệu lấy trực tiếp từ Firebase Realtime Database</p>
+    <canvas id="lightChart"></canvas>
+  </div>
+
+  <script>
+    // Firebase config
+    var firebaseConfig = {
+      apiKey: "AIzaSyAzOaM9SoQcYi7aAAF5kwEXN-DMB-6gDkY",
+      authDomain: "cambienanh-sang.firebaseapp.com",
+      databaseURL: "https://cambienanh-sang-default-rtdb.firebaseio.com",
+      projectId: "cambienanh-sang",
+      storageBucket: "cambienanh-sang.firebasestorage.app",
+      messagingSenderId: "1086585961238",
+      appId: "1:1086585961238:web:70ac5ddcb7cb817e3c2e37"
+    };
+    firebase.initializeApp(firebaseConfig);
+
+    var db = firebase.database().ref("sensor_data");
+
+    const ctx = document.getElementById("lightChart").getContext("2d");
+
+    const chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [{
+          label: "Light (%)",
+          data: [],
+          borderWidth: 2,
+          fill: false
+        }]
+      }
+    });
+
+    db.on("value", snap => {
+      const data = snap.val();
+      const labels = [];
+      const values = [];
+
+      for (let timestamp in data) {
+        labels.push(timestamp);
+        values.push(data[timestamp].light_inte);
+      }
+
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = values;
+      chart.update();
+    });
+  </script>
+
+</body>
+</html>
