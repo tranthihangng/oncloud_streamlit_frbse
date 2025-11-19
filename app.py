@@ -1,5 +1,5 @@
 import streamlit as st
-import pyrebase
+import requests
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -16,36 +16,15 @@ st.set_page_config(
 # Firebase config - Đọc từ Streamlit Secrets nếu có, nếu không dùng config mặc định
 try:
     if 'firebase' in st.secrets:
-        firebaseConfig = {
-            "apiKey": st.secrets["firebase"]["api_key"],
-            "authDomain": st.secrets["firebase"]["auth_domain"],
-            "databaseURL": st.secrets["firebase"]["database_url"],
-            "projectId": st.secrets["firebase"]["project_id"],
-            "storageBucket": st.secrets["firebase"]["storage_bucket"],
-            "messagingSenderId": st.secrets["firebase"]["messaging_sender_id"],
-            "appId": st.secrets["firebase"]["app_id"]
-        }
+        database_url = st.secrets["firebase"]["database_url"]
     else:
         raise KeyError("No secrets found")
 except (KeyError, AttributeError):
     # Fallback về config mặc định
-    firebaseConfig = {
-        "apiKey": "AIzaSyAzOaM9SoQcYi7aAAF5kwEXN-DMB-6gDkY",
-        "authDomain": "cambienanh-sang.firebaseapp.com",
-        "databaseURL": "https://cambienanh-sang-default-rtdb.firebaseio.com",
-        "projectId": "cambienanh-sang",
-        "storageBucket": "cambienanh-sang.firebasestorage.app",
-        "messagingSenderId": "1086585961238",
-        "appId": "1:1086585961238:web:70ac5ddcb7cb817e3c2e37"
-    }
+    database_url = "https://cambienanh-sang-default-rtdb.firebaseio.com"
 
-# Khởi tạo Firebase
-try:
-    firebase = pyrebase.initialize_app(firebaseConfig)
-    db = firebase.database()
-except Exception as e:
-    st.error(f"Lỗi kết nối Firebase: {e}")
-    st.stop()
+# Firebase Realtime Database URL
+FIREBASE_DB_URL = database_url.rstrip('/')
 
 # Tiêu đề
 st.title("📊 Dashboard – Light Sensor")
@@ -58,14 +37,19 @@ with st.sidebar:
     refresh_interval = st.slider("Khoảng thời gian làm mới (giây)", 1, 60, 5)
     max_data_points = st.slider("Số điểm dữ liệu tối đa", 10, 500, 100)
 
-# Hàm lấy dữ liệu từ Firebase
+# Hàm lấy dữ liệu từ Firebase bằng REST API
 @st.cache_data(ttl=1)  # Cache 1 giây
 def get_sensor_data():
     try:
-        data = db.child("sensor_data").get()
-        if data.val():
+        # Gọi Firebase Realtime Database REST API
+        url = f"{FIREBASE_DB_URL}/sensor_data.json"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        if data:
             records = []
-            for timestamp, values in data.val().items():
+            for timestamp, values in data.items():
                 if isinstance(values, dict) and "light_inte" in values:
                     records.append({
                         "timestamp": timestamp,
@@ -78,6 +62,9 @@ def get_sensor_data():
                 # Sắp xếp theo timestamp và giới hạn số điểm
                 df = df.sort_values("timestamp").tail(max_data_points)
                 return df
+        return pd.DataFrame()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Lỗi kết nối Firebase: {e}")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Lỗi khi lấy dữ liệu: {e}")
