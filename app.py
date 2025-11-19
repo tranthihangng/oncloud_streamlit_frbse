@@ -78,25 +78,43 @@ def get_sensor_data(show_debug=False):
             return pd.DataFrame()
         
         records = []
-        for timestamp, values in data.items():
-            if isinstance(values, dict):
-                if "light_inte" in values:
-                    records.append({
-                        "timestamp": timestamp,
-                        "light_inte": values.get("light_inte", 0),
-                        "datetime": datetime.fromtimestamp(int(timestamp)) if timestamp.isdigit() else None
-                    })
-                elif show_debug:
-                    st.warning(f"⚠️ Không tìm thấy key 'light_inte' trong: {timestamp}")
+        # Xử lý cấu trúc dữ liệu 3 tầng: ngày -> giờ -> dữ liệu
+        for date_key, time_data in data.items():
+            if isinstance(time_data, dict):
+                # Duyệt qua từng thời gian trong ngày
+                for time_key, sensor_data in time_data.items():
+                    if isinstance(sensor_data, dict) and "light_inte" in sensor_data:
+                        # Tạo timestamp từ ngày và giờ
+                        try:
+                            # Kết hợp ngày và giờ để tạo datetime
+                            datetime_str = f"{date_key} {time_key}"
+                            dt = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+                            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        except:
+                            # Nếu không parse được, dùng format gốc
+                            timestamp = f"{date_key} {time_key}"
+                            dt = None
+                        
+                        records.append({
+                            "timestamp": timestamp,
+                            "light_inte": sensor_data.get("light_inte", 0),
+                            "raw": sensor_data.get("raw", 0),
+                            "datetime": dt
+                        })
+                    elif show_debug and isinstance(sensor_data, dict):
+                        st.warning(f"⚠️ Không tìm thấy key 'light_inte' trong: {date_key}/{time_key}")
             elif show_debug:
-                st.warning(f"⚠️ Giá trị không phải dict: {timestamp} = {values}")
+                st.warning(f"⚠️ Giá trị không phải dict: {date_key} = {time_data}")
         
         if records:
             df = pd.DataFrame(records)
-            # Sắp xếp theo timestamp và giới hạn số điểm
-            df = df.sort_values("timestamp").tail(max_data_points)
+            # Sắp xếp theo datetime nếu có, nếu không thì theo timestamp
+            if df['datetime'].notna().any():
+                df = df.sort_values("datetime").tail(max_data_points)
+            else:
+                df = df.sort_values("timestamp").tail(max_data_points)
             if show_debug:
-                st.success(f"✅ Đã lấy được {len(records)} bản ghi")
+                st.success(f"✅ Đã lấy được {len(records)} bản ghi (hiển thị {len(df)} bản ghi)")
             return df
         else:
             if show_debug:
@@ -146,13 +164,17 @@ if not df.empty:
     # Vẽ biểu đồ
     fig = go.Figure()
     
+    # Sử dụng datetime nếu có, nếu không dùng timestamp
+    x_data = df['datetime'] if df['datetime'].notna().any() else df['timestamp']
+    
     fig.add_trace(go.Scatter(
-        x=df['timestamp'] if df['datetime'].isna().all() else df['datetime'],
+        x=x_data,
         y=df['light_inte'],
         mode='lines+markers',
         name='Light (%)',
         line=dict(width=2, color='#1f77b4'),
-        marker=dict(size=4)
+        marker=dict(size=4),
+        hovertemplate='<b>Thời gian:</b> %{x}<br><b>Light:</b> %{y}%<extra></extra>'
     ))
     
     fig.update_layout(
@@ -161,14 +183,27 @@ if not df.empty:
         yaxis_title="Light (%)",
         height=400,
         hovermode='x unified',
-        template='plotly_white'
+        template='plotly_white',
+        xaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='lightgray'
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='lightgray'
+        )
     )
     
     st.plotly_chart(fig, use_container_width=True)
     
     # Hiển thị bảng dữ liệu
     with st.expander("📋 Xem dữ liệu chi tiết"):
-        st.dataframe(df[['timestamp', 'light_inte']].tail(20), use_container_width=True)
+        display_cols = ['timestamp', 'light_inte']
+        if 'raw' in df.columns:
+            display_cols.append('raw')
+        st.dataframe(df[display_cols].tail(20), use_container_width=True)
     
     # Làm mới tự động
     if auto_refresh:
@@ -198,12 +233,19 @@ else:
         
         3. **Kiểm tra path dữ liệu**: Đảm bảo có dữ liệu tại path `sensor_data` trong Firebase Console
         
-        4. **Cấu trúc dữ liệu**: Dữ liệu phải có dạng:
+        4. **Cấu trúc dữ liệu**: Dữ liệu phải có dạng (3 tầng: ngày -> giờ -> dữ liệu):
         ```json
         {
           "sensor_data": {
-            "1234567890": {
-              "light_inte": 75
+            "2025-11-19": {
+              "10:20:59": {
+                "light_inte": 39,
+                "raw": 2511
+              },
+              "10:21:09": {
+                "light_inte": 39,
+                "raw": 2499
+              }
             }
           }
         }
